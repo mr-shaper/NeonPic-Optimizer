@@ -342,14 +342,17 @@ async function compressSingleFile(file, fileId, isLossy, quality) {
             if (settings.action === 'minify') {
                 compressedFile = await minifySVG(file);
             } else if (settings.action === 'raster') {
-                compressedFile = await rasterizeSVG(file, settings.rasterFormat, settings.rasterQuality);
+                const rasterFormat = settings.rasterFormat || 'image/png';
+                const rasterQuality = settings.rasterQuality || 1.0;
+                compressedFile = await rasterizeSVG(file, rasterFormat, rasterQuality);
             } else if (settings.action === 'gif') {
                 // Use smartCompressGif for GIF
                 compressedFile = await smartCompressGif(file, settings, (status) => {
                     statusText.textContent = status;
-                    // Optional: Update progress bar if status contains percentage
-                    // But for now text is enough
                 });
+            } else if (settings.action === 'pdf') {
+                statusText.textContent = 'Converting to PDF...';
+                compressedFile = await convertSVGtoPDF(file);
             }
 
         } else {
@@ -404,6 +407,7 @@ async function compressSingleFile(file, fileId, isLossy, quality) {
             if (compressedFile.type === 'image/png') ext = 'png';
             if (compressedFile.type === 'image/gif') ext = 'gif';
             if (compressedFile.type === 'image/jpeg') ext = 'jpg';
+            if (compressedFile.type === 'application/pdf') ext = 'pdf';
 
             a.download = file.name.replace(/\.[^/.]+$/, "") + "_optimized." + ext;
             a.click();

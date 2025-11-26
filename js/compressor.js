@@ -36,6 +36,67 @@ async function compressImage(file, options = {}) {
     }
 }
 
+// SVG to PDF conversion
+async function convertSVGtoPDF(file) {
+    const { jsPDF } = window.jspdf;
+
+    // Parse SVG to get dimensions
+    const text = await file.text();
+    const parser = new DOMParser();
+    const svgDoc = parser.parseFromString(text, 'image/svg+xml');
+    const svgElement = svgDoc.documentElement;
+
+    let width, height;
+
+    // Try viewBox first
+    const viewBox = svgElement.getAttribute('viewBox');
+    if (viewBox) {
+        const parts = viewBox.trim().split(/\s+|,/);
+        width = parseFloat(parts[2]);
+        height = parseFloat(parts[3]);
+    }
+
+    // Fallback to width/height attributes
+    if (!width || !height) {
+        width = parseFloat(svgElement.getAttribute('width')) || 800;
+        height = parseFloat(svgElement.getAttribute('height')) || 600;
+    }
+
+    // Convert px to mm for PDF (72 DPI = 1 inch = 25.4 mm)
+    const widthMM = (width / 72) * 25.4;
+    const heightMM = (height / 72) * 25.4;
+
+    // Create PDF with custom page size matching SVG
+    const pdf = new jsPDF({
+        orientation: width > height ? 'landscape' : 'portrait',
+        unit: 'mm',
+        format: [widthMM, heightMM]
+    });
+
+    // Create a data URL from the SVG
+    const svgBlob = new Blob([text], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+
+    // Load SVG as image
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            // Add SVG as image to PDF (preserves vector quality in modern browsers)
+            pdf.addImage(img, 'PNG', 0, 0, widthMM, heightMM);
+
+            // Get PDF as blob
+            const pdfBlob = pdf.output('blob');
+            URL.revokeObjectURL(url);
+            resolve(pdfBlob);
+        };
+        img.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error('Failed to load SVG'));
+        };
+        img.src = url;
+    });
+}
+
 // SVG Minification
 async function minifySVG(file) {
     const text = await file.text();
