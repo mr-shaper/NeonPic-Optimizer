@@ -51,32 +51,66 @@ async function minifySVG(file) {
 
 // SVG to Raster (PNG/JPG)
 async function rasterizeSVG(file, format = 'image/png', quality = 1.0) {
-    return new Promise((resolve, reject) => {
-        const url = URL.createObjectURL(file);
-        const img = new Image();
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            // Use explicit size or default to something reasonable if missing
-            canvas.width = img.width || 800;
-            canvas.height = img.height || 600;
-            const ctx = canvas.getContext('2d');
-
-            // Fill white background for JPG (otherwise transparent becomes black)
-            if (format === 'image/jpeg') {
-                ctx.fillStyle = '#FFFFFF';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
+    return new Promise(async (resolve, reject) => {
+        try {
+            // Parse SVG to get viewBox dimensions
+            const svgText = await file.text();
+            const parser = new DOMParser();
+            const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');
+            const svgElement = svgDoc.documentElement;
+            
+            let width, height;
+            
+            // Try to get dimensions from viewBox first (most reliable for complex SVGs)
+            const viewBox = svgElement.getAttribute('viewBox');
+            if (viewBox) {
+                const parts = viewBox.trim().split(/\s+|,/);
+                width = parseFloat(parts[2]);
+                height = parseFloat(parts[3]);
             }
-
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-            canvas.toBlob((blob) => {
-                URL.revokeObjectURL(url);
-                if (blob) resolve(blob);
-                else reject(new Error("Canvas to Blob failed"));
-            }, format, quality);
-        };
-        img.onerror = reject;
-        img.src = url;
+            
+            // Fallback to width/height attributes
+            if (!width || !height) {
+                width = parseFloat(svgElement.getAttribute('width')) || 800;
+                height = parseFloat(svgElement.getAttribute('height')) || 600;
+            }
+            
+            // For high-DPI rendering, use a scale factor
+            const scale = 2; // 2x for sharper text/graphics
+            const canvasWidth = Math.round(width * scale);
+            const canvasHeight = Math.round(height * scale);
+            
+            const url = URL.createObjectURL(file);
+            const img = new Image();
+            
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = canvasWidth;
+                canvas.height = canvasHeight;
+                const ctx = canvas.getContext('2d');
+                
+                // Fill white background for JPG (otherwise transparent becomes black)
+                if (format === 'image/jpeg') {
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+                }
+                
+                // Scale context for high-DPI rendering
+                ctx.scale(scale, scale);
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                canvas.toBlob((blob) => {
+                    URL.revokeObjectURL(url);
+                    if (blob) resolve(blob);
+                    else reject(new Error("Canvas to Blob failed"));
+                }, format, quality);
+            };
+            
+            img.onerror = reject;
+            img.src = url;
+        } catch (error) {
+            reject(error);
+        }
     });
 }
 
