@@ -58,9 +58,9 @@ async function rasterizeSVG(file, format = 'image/png', quality = 1.0) {
             const parser = new DOMParser();
             const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');
             const svgElement = svgDoc.documentElement;
-            
+
             let width, height;
-            
+
             // Try to get dimensions from viewBox first (most reliable for complex SVGs)
             const viewBox = svgElement.getAttribute('viewBox');
             if (viewBox) {
@@ -68,44 +68,44 @@ async function rasterizeSVG(file, format = 'image/png', quality = 1.0) {
                 width = parseFloat(parts[2]);
                 height = parseFloat(parts[3]);
             }
-            
+
             // Fallback to width/height attributes
             if (!width || !height) {
                 width = parseFloat(svgElement.getAttribute('width')) || 800;
                 height = parseFloat(svgElement.getAttribute('height')) || 600;
             }
-            
+
             // For high-DPI rendering, use a scale factor
             const scale = 2; // 2x for sharper text/graphics
             const canvasWidth = Math.round(width * scale);
             const canvasHeight = Math.round(height * scale);
-            
+
             const url = URL.createObjectURL(file);
             const img = new Image();
-            
+
             img.onload = () => {
                 const canvas = document.createElement('canvas');
                 canvas.width = canvasWidth;
                 canvas.height = canvasHeight;
                 const ctx = canvas.getContext('2d');
-                
+
                 // Fill white background for JPG (otherwise transparent becomes black)
                 if (format === 'image/jpeg') {
                     ctx.fillStyle = '#FFFFFF';
                     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
                 }
-                
+
                 // Scale context for high-DPI rendering
                 ctx.scale(scale, scale);
                 ctx.drawImage(img, 0, 0, width, height);
-                
+
                 canvas.toBlob((blob) => {
                     URL.revokeObjectURL(url);
                     if (blob) resolve(blob);
                     else reject(new Error("Canvas to Blob failed"));
                 }, format, quality);
             };
-            
+
             img.onerror = reject;
             img.src = url;
         } catch (error) {
@@ -313,76 +313,129 @@ async function smartCompressGif(file, options, onProgress) {
 }
 
 async function convertSVGtoGIF_Custom(file, duration, fps, width, height, quality, onProgress) {
-    return new Promise((resolve, reject) => {
-        const url = URL.createObjectURL(file);
-        const img = new Image();
+    return new Promise(async (resolve, reject) => {
+        try {
+            const url = URL.createObjectURL(file);
 
-        img.onload = async () => {
-            try {
-                // Use provided dims or original
-                const w = width || img.width || 800;
-                const h = height || img.height || 600;
+            // Create a hidden container to embed the SVG
+            const container = document.createElement('div');
+            container.style.position = 'fixed';
+            container.style.top = '-10000px';
+            container.style.left = '-10000px';
+            container.style.width = `${width}px`;
+            container.style.height = `${height}px`;
+            document.body.appendChild(container);
 
-                const gif = new GIF({
-                    workers: 2,
-                    quality: quality,
-                    width: w,
-                    height: h,
-                    workerScript: 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js'
-                });
+            // Embed SVG using object (better for animation access)
+            const object = document.createElement('object');
+            object.type = 'image/svg+xml';
+            object.data = url;
+            object.style.width = `${width}px`;
+            object.style.height = `${height}px`;
+            container.appendChild(object);
 
-                const canvas = document.createElement('canvas');
-                canvas.width = w;
-                canvas.height = h;
-                const ctx = canvas.getContext('2d');
+            // Wait for SVG to load
+            await new Promise((resolveLoad, rejectLoad) => {
+                object.onload = resolveLoad;
+                object.onerror = rejectLoad;
+                setTimeout(rejectLoad, 5000); // 5s timeout
+            });
 
-                const totalFrames = duration * fps;
-                const interval = 1000 / fps;
-
-                let frameCount = 0;
-
-                // Report progress during capture
-                const captureFrame = () => {
-                    ctx.clearRect(0, 0, w, h);
-                    ctx.drawImage(img, 0, 0, w, h);
-                    gif.addFrame(ctx, { copy: true, delay: interval });
-
-                    frameCount++;
-
-                    // Update progress every 5 frames or so to avoid UI thrashing
-                    if (frameCount % 5 === 0 || frameCount === totalFrames) {
-                        const pct = Math.round((frameCount / totalFrames) * 50); // Capture is first 50%
-                        if (onProgress) onProgress(`Capturing ${frameCount}/${totalFrames} (${pct}%)`);
-                    }
-
-                    if (frameCount < totalFrames) {
-                        // Use setTimeout to allow UI updates
-                        setTimeout(captureFrame, interval);
-                    } else {
-                        if (onProgress) onProgress(`Rendering GIF...`);
-                        gif.render();
-                    }
-                };
-
-                // Report progress during rendering
-                gif.on('progress', (pct) => {
-                    // Rendering is the last 50%
-                    const totalPct = 50 + Math.round(pct * 50);
-                    if (onProgress) onProgress(`Encoding ${Math.round(pct * 100)}% (Total ${totalPct}%)`);
-                });
-
-                gif.on('finished', (blob) => {
-                    URL.revokeObjectURL(url);
-                    resolve(blob);
-                });
-
-                captureFrame();
-
-            } catch (e) {
-                reject(e);
+            // Get SVG document and animations
+            const svgDoc = object.contentDocument;
+            if (!svgDoc) {
+                throw new Error('Cannot access SVG document (CORS?)');
             }
-        };
-        img.onerror = reject;
-        img.src = url;
+
+            const animations = svgDoc.getAnimations ? svgDoc.getAnimations({ subtree: true }) : [];
+
+            if (onProgress) onProgress(`Found ${animations.length} animations`);
+
+            // Pause all animations and reset to start
+            animations.forEach(anim => {
+                anim.pause();
+                anim.currentTime = 0;
+            });
+
+            // Setup GIF encoder
+            const gif = new GIF({
+                workers: 2,
+                quality: quality,
+                width: width,
+                height: height,
+                workerScript: 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js'
+            });
+
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+
+            const totalFrames = duration * fps;
+            const frameDuration = 1000 / fps; // ms per frame
+
+            // Capture frames
+            for (let i = 0; i < totalFrames; i++) {
+                const currentTimeMs = (i / fps) * 1000;
+
+                // Set animation time
+                animations.forEach(anim => {
+                    anim.currentTime = currentTimeMs;
+                });
+
+                // Wait for render (important!)
+                await new Promise(r => requestAnimationFrame(r));
+                await new Promise(r => setTimeout(r, 10)); // Extra wait for complex animations
+
+                // Capture frame using SVG serialization
+                const svgElement = svgDoc.documentElement;
+                const serializer = new XMLSerializer();
+                const svgString = serializer.serializeToString(svgElement);
+                const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+                const svgUrl = URL.createObjectURL(svgBlob);
+
+                // Draw to canvas
+                const img = new Image();
+                await new Promise((resolveImg, rejectImg) => {
+                    img.onload = resolveImg;
+                    img.onerror = rejectImg;
+                    img.src = svgUrl;
+                });
+
+                ctx.clearRect(0, 0, width, height);
+                ctx.drawImage(img, 0, 0, width, height);
+                URL.revokeObjectURL(svgUrl);
+
+                // Add frame to GIF
+                gif.addFrame(ctx, { copy: true, delay: frameDuration });
+
+                // Progress update
+                if (i % 5 === 0 || i === totalFrames - 1) {
+                    const pct = Math.round((i / totalFrames) * 50);
+                    if (onProgress) onProgress(`Capturing ${i + 1}/${totalFrames} (${pct}%)`);
+                }
+            }
+
+            // Cleanup container
+            document.body.removeChild(container);
+            URL.revokeObjectURL(url);
+
+            // Render GIF
+            if (onProgress) onProgress('Rendering GIF...');
+
+            gif.on('progress', (pct) => {
+                const totalPct = 50 + Math.round(pct * 50);
+                if (onProgress) onProgress(`Encoding ${Math.round(pct * 100)}% (Total ${totalPct}%)`);
+            });
+
+            gif.on('finished', (blob) => {
+                resolve(blob);
+            });
+
+            gif.render();
+
+        } catch (error) {
+            reject(error);
+        }
     });
 }
