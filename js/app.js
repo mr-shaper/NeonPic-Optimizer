@@ -184,6 +184,16 @@ function processFiles(newFiles) {
     // Filter valid images
     const validFiles = newFiles.filter(file => file.type.startsWith('image/'));
 
+    // Check for SVG batch restriction
+    const svgFiles = validFiles.filter(file => file.type === 'image/svg+xml');
+    if (svgFiles.length > 1) {
+        alert('⚠️ Batch Processing Limitation\n\n' +
+            'SVG files (especially animated ones) require intensive processing.\n\n' +
+            'Please upload SVG files ONE AT A TIME to ensure optimal performance and quality.\n\n' +
+            'You can batch process other image formats (PNG, JPG, WebP, etc.) up to 60 images at once.');
+        return; // Abort processing
+    }
+
     validFiles.forEach(file => {
         const fileId = `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         addFileToList(file, fileId);
