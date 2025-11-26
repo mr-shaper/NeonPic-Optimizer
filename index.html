@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeonCrush - Cyberpunk Image Optimizer</title>
+    <meta name="description"
+        content="Lossless and Lossy image compression for JPG, PNG, WebP, GIF, and SVG. Secure client-side processing.">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-container">
+        <header class="main-header">
+            <div class="logo">
+                <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="32" height="32" rx="8" fill="url(#logo-gradient)" />
+                    <path d="M16 8L24 16L16 24L8 16L16 8Z" fill="white" />
+                    <defs>
+                        <linearGradient id="logo-gradient" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="#4F46E5" />
+                            <stop offset="1" stop-color="#7C3AED" />
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <span>Neon-Crush Compressor</span>
+            </div>
+            <nav>
+                <a href="#" class="active">Compressor</a>
+                <a href="#">Features</a>
+            </nav>
+        </header>
+
+        <main>
+            <section class="hero">
+                <h1>Optimize your images <br><span class="gradient-text">without losing quality</span></h1>
+                <p class="subtitle">Support for JPEG, PNG, GIF, SVG, and WebP. Secure client-side compression.</p>
+
+                <div class="drop-zone" id="dropZone">
+                    <div class="drop-content">
+                        <div class="icon-cloud">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="17 8 12 3 7 8" />
+                                <line x1="12" y1="3" x2="12" y2="15" />
+                            </svg>
+                        </div>
+                        <h3>Drag & Drop your images here</h3>
+                        <p>or <button class="btn-link" id="browseBtn">browse files</button></p>
+                        <span class="limit-info">Up to 60 images • Max 100MB each</span>
+                    </div>
+                    <input type="file" id="fileInput" multiple
+                        accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml" hidden>
+                </div>
+
+                <div class="settings-bar">
+                    <div class="toggle-group">
+                        <label>Mode:</label>
+                        <div class="toggle-switch">
+                            <input type="radio" name="mode" id="lossy" value="lossy">
+                            <label for="lossy">Lossy</label>
+                            <input type="radio" name="mode" id="lossless" value="lossless" checked>
+                            <label for="lossless">Lossless</label>
+                            <div class="slider"></div>
+                        </div>
+                    </div>
+
+                    <div class="quality-control" id="qualityControl" style="display: none;">
+                        <label for="qualitySlider">Quality: <span id="qualityValue">80%</span></label>
+                        <input type="range" id="qualitySlider" min="1" max="100" value="80">
+                    </div>
+
+                    <div class="actions">
+                        <button class="btn-primary" id="startCompressBtn" disabled>Compress Now</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="results-section" id="resultsSection" hidden>
+                <div class="results-header">
+                    <h2>Optimized Images</h2>
+                    <button class="btn-primary" id="downloadAllBtn">Download All</button>
+                </div>
+                <div class="file-list" id="fileList">
+                    <!-- File items will be injected here -->
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>&copy; 2024 Neon-Crush Compressor. Privacy protected - Images never leave your browser.</p>
+        </footer>
+    </div>
+
+    <!-- Comparison Modal -->
+    <div class="modal" id="compareModal" hidden>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Compare</h3>
+                <button class="close-btn" id="closeModal">&times;</button>
+            </div>
+            <div class="compare-container" id="compareContainer">
+                <!-- Comparison slider will be here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- SVG Options Modal -->
+    <div class="modal" id="svgModal" hidden>
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>SVG Optimization Options</h3>
+                <button class="close-btn" id="closeSvgModal">&times;</button>
+            </div>
+            <div class="svg-options">
+                <div id="svg-status-msg"
+                    style="margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 6px; font-size: 0.9rem; display: none;">
+                </div>
+
+                <p>How would you like to process this SVG?</p>
+
+                <div class="option-group">
+                    <input type="radio" name="svg-action" id="svg-minify" value="minify" checked>
+                    <label for="svg-minify">
+                        <strong>Minify Code</strong> <span class="badge-recommend" id="rec-minify"
+                            style="display:none; background: var(--primary); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 8px;">Recommended</span>
+                        <span class="desc">Removes whitespace & comments. Keeps vector format.</span>
+                    </label>
+                </div>
+
+                <div class="option-group">
+                    <input type="radio" name="svg-action" id="svg-raster" value="raster">
+                    <label for="svg-raster">
+                        <strong>Convert to Image</strong> <span class="badge-recommend" id="rec-raster"
+                            style="display:none; background: var(--primary); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 8px;">Recommended</span>
+                        <span class="desc">Rasterize to PNG or JPG.</span>
+                    </label>
+                </div>
+
+                <div id="svg-raster-settings" style="display: none; margin-top: 10px; padding-left: 20px;">
+                    <div style="margin-bottom: 8px;">
+                        <label>Format:</label>
+                        <input type="radio" name="raster-format" id="fmt-png" value="image/png" checked> <label
+                            for="fmt-png">PNG</label>
+                        <input type="radio" name="raster-format" id="fmt-jpg" value="image/jpeg"> <label
+                            for="fmt-jpg">JPG</label>
+                    </div>
+                    <div id="raster-quality-group" style="display: none;">
+                        <label>Quality: <span id="raster-quality-val">90%</span></label>
+                        <input type="range" id="raster-quality" min="1" max="100" value="90">
+                    </div>
+                </div>
+
+                <div class="option-group">
+                    <input type="radio" name="svg-action" id="svg-gif" value="gif">
+                    <label for="svg-gif">
+                        <strong>Convert to GIF</strong> <span class="badge-recommend" id="rec-gif"
+                            style="display:none; background: var(--primary); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; margin-left: 8px;">Recommended</span>
+                        <span class="desc">Capture animation to GIF.</span>
+                    </label>
+                </div>
+
+                <div id="svg-gif-settings" style="display: none; margin-top: 10px; padding-left: 20px;">
+                    <div style="margin-bottom: 8px;">
+                        <label>Duration (s): <input type="number" id="gif-duration" value="3" min="1" max="60"
+                                style="width: 60px;"></label>
+                        <button id="autoDetectBtn" class="btn-small"
+                            title="Auto-detect duration from SVG code">Auto</button>
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        <label>FPS: <input type="number" id="gif-fps" value="30" min="10" max="60"
+                                style="width: 60px;"></label>
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        <label>Quality: <span id="gif-quality-val">80%</span></label>
+                        <input type="range" id="gif-quality" min="1" max="100" value="80">
+                    </div>
+                    <div>
+                        <label>Max Size (MB): <input type="number" id="gif-max-size" value="5" min="1" max="50"
+                                style="width: 60px;"></label>
+                        <span class="desc" style="font-size: 0.75rem; display: block; margin-top: 4px;">Auto-reduces
+                            quality if exceeded.</span>
+                    </div>
+                </div>
+
+                <div class="actions" style="margin-top: 20px;">
+                    <button class="btn-primary" id="processSvgBtn">Process SVG</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Libraries (UMD for file:// support) -->
+    <script
+        src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.2/dist/browser-image-compression.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
+
+    <!-- App Scripts -->
+    <script src="js/compressor.js"></script>
+    <script src="js/app.js"></script>
+</body>
+
+</html>
