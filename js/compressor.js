@@ -228,6 +228,21 @@ async function smartCompressGif(file, options, onProgress) {
     const originalHeight = img.height || 600;
     URL.revokeObjectURL(url);
 
+    // Smart Resolution Scaling
+    // For long animations (>10s), limit max dimension to 600px
+    // For standard animations, limit max dimension to 800px
+    // This drastically reduces memory usage and encoding time
+    let maxDimension = 800;
+    if (duration > 10) maxDimension = 600;
+    if (duration > 20) maxDimension = 500; // Very long animations need more aggressive scaling
+
+    const currentMax = Math.max(originalWidth, originalHeight);
+    if (currentMax > maxDimension) {
+        scale = maxDimension / currentMax;
+        console.log(`Smart Scaling: Downscaling from ${currentMax}px to ${maxDimension}px (Scale: ${scale.toFixed(2)})`);
+        if (onProgress) onProgress(`Optimizing: Resizing to ${Math.round(originalWidth * scale)}x${Math.round(originalHeight * scale)} for performance...`);
+    }
+
     let attempt = 1;
     const maxAttempts = 3;
 
