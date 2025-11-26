@@ -36,7 +36,7 @@ async function compressImage(file, options = {}) {
     }
 }
 
-// SVG to PDF conversion
+// SVG to PDF conversion (True Vector)
 async function convertSVGtoPDF(file) {
     const { jsPDF } = window.jspdf;
 
@@ -62,39 +62,35 @@ async function convertSVGtoPDF(file) {
         height = parseFloat(svgElement.getAttribute('height')) || 600;
     }
 
-    // Convert px to mm for PDF (72 DPI = 1 inch = 25.4 mm)
-    const widthMM = (width / 72) * 25.4;
-    const heightMM = (height / 72) * 25.4;
+    // Convert px to pt for PDF (1px = 0.75pt at 96 DPI)
+    const widthPt = width * 0.75;
+    const heightPt = height * 0.75;
 
     // Create PDF with custom page size matching SVG
     const pdf = new jsPDF({
-        orientation: width > height ? 'landscape' : 'portrait',
-        unit: 'mm',
-        format: [widthMM, heightMM]
+        orientation: width > height ? 'l' : 'p',
+        unit: 'pt',
+        format: [widthPt, heightPt],
+        compress: true
     });
 
-    // Create a data URL from the SVG
-    const svgBlob = new Blob([text], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(svgBlob);
+    // Use svg2pdf.js for true vector conversion
+    try {
+        await pdf.svg(svgElement, {
+            x: 0,
+            y: 0,
+            width: widthPt,
+            height: heightPt
+        });
 
-    // Load SVG as image
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => {
-            // Add SVG as image to PDF (preserves vector quality in modern browsers)
-            pdf.addImage(img, 'PNG', 0, 0, widthMM, heightMM);
-
-            // Get PDF as blob
-            const pdfBlob = pdf.output('blob');
-            URL.revokeObjectURL(url);
-            resolve(pdfBlob);
-        };
-        img.onerror = () => {
-            URL.revokeObjectURL(url);
-            reject(new Error('Failed to load SVG'));
-        };
-        img.src = url;
-    });
+        // Get PDF as blob
+        const pdfBlob = pdf.output('blob');
+        return pdfBlob;
+    } catch (error) {
+        console.error('svg2pdf failed, falling back to raster:', error);
+        // Fallback to raster if svg2pdf fails (for complex animations etc)
+        throw error;
+    }
 }
 
 // SVG Minification
