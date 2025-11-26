@@ -22,3 +22,4 @@ High-performance, client-side image compression tool with a premium cyberpunk ae
 3. For SVGs, choose your optimization method (Minify/Raster/GIF).
 4. For Images, adjust quality and click "Compress Now".
 5. Click the "Compare" icon to check results.
+# Test simplified workflow
