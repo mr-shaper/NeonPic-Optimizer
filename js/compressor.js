@@ -36,8 +36,8 @@ async function compressImage(file, options = {}) {
     }
 }
 
-// SVG to PDF conversion (True Vector)
-async function convertSVGtoPDF(file) {
+// SVG to PDF conversion (Hybrid: Vector + Raster fallback)
+async function convertSVGtoPDF(file, method = 'auto') {
     const { jsPDF } = window.jspdf;
 
     // Parse SVG to get dimensions
@@ -52,8 +52,11 @@ async function convertSVGtoPDF(file) {
     const viewBox = svgElement.getAttribute('viewBox');
     if (viewBox) {
         const parts = viewBox.trim().split(/\s+|,/);
-        width = parseFloat(parts[2]);
-        height = parseFloat(parts[3]);
+        // Handle viewBox with x,y offsets: "minX minY width height"
+        if (parts.length === 4) {
+            width = parseFloat(parts[2]);
+            height = parseFloat(parts[3]);
+        }
     }
 
     // Fallback to width/height attributes
@@ -61,6 +64,38 @@ async function convertSVGtoPDF(file) {
         width = parseFloat(svgElement.getAttribute('width')) || 800;
         height = parseFloat(svgElement.getAttribute('height')) || 600;
     }
+
+    // Auto-detect method based on content
+    const hasNonAscii = /[^\x00-\x7F]/.test(text);
+
+    if (method === 'auto') {
+        if (hasNonAscii) {
+            console.log('Non-ASCII characters detected. Attempting Vector PDF with Chinese Font support...');
+            // We now try vector first even for Chinese, because we added font support
+            method = 'vector';
+        } else {
+            console.log('ASCII-only content, using vector PDF');
+            method = 'vector';
+        }
+    }
+
+    // Use rasterized PDF for non-ASCII content or if explicitly requested
+    if (method === 'raster') {
+        return await convertSVGtoPDF_Raster(file, width, height);
+    }
+
+    // Try vector conversion for ASCII content
+    try {
+        return await convertSVGtoPDF_Vector(file, width, height, svgElement);
+    } catch (error) {
+        console.warn('Vector PDF conversion failed, falling back to rasterized PDF:', error);
+        return await convertSVGtoPDF_Raster(file, width, height);
+    }
+}
+
+// Vector PDF conversion (for ASCII/Latin content)
+async function convertSVGtoPDF_Vector(file, width, height, svgElement) {
+    const { jsPDF } = window.jspdf;
 
     // Convert px to pt for PDF (1px = 0.75pt at 96 DPI)
     const widthPt = width * 0.75;
@@ -74,23 +109,128 @@ async function convertSVGtoPDF(file) {
         compress: true
     });
 
-    // Use svg2pdf.js for true vector conversion
+    // Try to load Chinese font for vector support
     try {
-        await pdf.svg(svgElement, {
-            x: 0,
-            y: 0,
-            width: widthPt,
-            height: heightPt
-        });
+        console.log('Fetching Chinese font (Noto Sans SC)...');
+        // Use Noto Sans CJK SC from jsDelivr (GitHub mirror) which supports CORS
+        const fontUrl = 'https://cdn.jsdelivr.net/gh/googlefonts/noto-cjk@main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf';
+        const response = await fetch(fontUrl);
+        if (!response.ok) throw new Error('Font fetch failed');
 
-        // Get PDF as blob
-        const pdfBlob = pdf.output('blob');
-        return pdfBlob;
-    } catch (error) {
-        console.error('svg2pdf failed, falling back to raster:', error);
-        // Fallback to raster if svg2pdf fails (for complex animations etc)
-        throw error;
+        const fontBlob = await response.blob();
+        const reader = new FileReader();
+
+        await new Promise((resolve, reject) => {
+            reader.onloadend = () => {
+                const base64data = reader.result.split(',')[1];
+                // Add font to VFS
+                pdf.addFileToVFS('NotoSansSC.otf', base64data);
+                // Add font to jsPDF
+                pdf.addFont('NotoSansSC.otf', 'NotoSansSC', 'normal');
+                // Set font
+                pdf.setFont('NotoSansSC');
+                resolve();
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(fontBlob);
+        });
+        console.log('Chinese font loaded successfully');
+    } catch (e) {
+        console.warn('Failed to load Chinese font, text may not render correctly:', e);
     }
+
+    // Use svg2pdf.js for true vector conversion
+    await pdf.svg(svgElement, {
+        x: 0,
+        y: 0,
+        width: widthPt,
+        height: heightPt
+    });
+
+    // Get PDF as blob with correct MIME type
+    const pdfBlob = pdf.output('blob');
+    console.log('[Vector PDF] Original blob type:', pdfBlob.type);
+    // Ensure the blob has the correct type for download
+    const finalBlob = new Blob([pdfBlob], { type: 'application/pdf' });
+    console.log('[Vector PDF] Final blob type:', finalBlob.type, 'Size:', finalBlob.size);
+    return finalBlob;
+}
+
+// Rasterized PDF conversion (for Chinese/non-ASCII content)
+async function convertSVGtoPDF_Raster(file, width, height) {
+    const { jsPDF } = window.jspdf;
+
+    return new Promise(async (resolve, reject) => {
+        try {
+            // Use high DPI scale for crisp text rendering
+            const scale = 3; // 3x for very sharp text
+            const canvasWidth = Math.round(width * scale);
+            const canvasHeight = Math.round(height * scale);
+
+            const url = URL.createObjectURL(file);
+            const img = new Image();
+
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = canvasWidth;
+                canvas.height = canvasHeight;
+                const ctx = canvas.getContext('2d');
+
+                // White background
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+                // Scale context for high-DPI rendering
+                ctx.scale(scale, scale);
+                ctx.drawImage(img, 0, 0, width, height);
+
+                // Convert canvas to blob
+                canvas.toBlob(async (imgBlob) => {
+                    URL.revokeObjectURL(url);
+
+                    if (!imgBlob) {
+                        reject(new Error('Failed to create image from canvas'));
+                        return;
+                    }
+
+                    // Create PDF with image
+                    const widthPt = width * 0.75;
+                    const heightPt = height * 0.75;
+
+                    const pdf = new jsPDF({
+                        orientation: width > height ? 'l' : 'p',
+                        unit: 'pt',
+                        format: [widthPt, heightPt],
+                        compress: true
+                    });
+
+                    // Convert blob to data URL for embedding
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        pdf.addImage(e.target.result, 'PNG', 0, 0, widthPt, heightPt, undefined, 'FAST');
+                        const pdfBlob = pdf.output('blob');
+                        console.log('[Raster PDF] Original blob type:', pdfBlob.type);
+                        // Ensure the blob has the correct MIME type for download
+                        const finalBlob = new Blob([pdfBlob], { type: 'application/pdf' });
+                        console.log('[Raster PDF] Final blob type:', finalBlob.type, 'Size:', finalBlob.size);
+                        resolve(finalBlob);
+                    };
+                    reader.onerror = reject;
+                    reader.readAsDataURL(imgBlob);
+
+                }, 'image/png', 0.95); // High quality PNG
+            };
+
+            img.onerror = () => {
+                URL.revokeObjectURL(url);
+                reject(new Error('Failed to load SVG image'));
+            };
+
+            img.src = url;
+        } catch (error) {
+            reject(error);
+        }
+    });
 }
 
 // SVG Minification
@@ -297,13 +437,12 @@ async function detectSvgDuration(file) {
 async function smartCompressGif(file, options, onProgress) {
     let { duration, fps, maxSizeMB, gifQuality = 80 } = options;
 
-    // Smart FPS Reduction for Long Animations
-    // If duration > 10s and FPS > 15, reduce to 15 to prevent memory crash/hanging
-    if (duration > 10 && fps > 15) {
-        console.log(`Smart FPS: Reducing FPS from ${fps} to 15 for long animation (${duration}s)`);
-        if (onProgress) onProgress(`Optimizing: Reducing FPS to 15 for stability...`);
-        fps = 15;
-    }
+    // Smart FPS Reduction - DISABLED to respect user settings
+    // if (duration > 10 && fps > 15) {
+    //     console.log(`Smart FPS: Reducing FPS from ${fps} to 15 for long animation (${duration}s)`);
+    //     if (onProgress) onProgress(`Optimizing: Reducing FPS to 15 for stability...`);
+    //     fps = 15;
+    // }
 
     // Map 1-100 (User) to 30-1 (GIF Encoder)
     let baseQuality = Math.max(1, Math.min(30, Math.round(1 + (100 - gifQuality) * 0.29)));
@@ -319,16 +458,23 @@ async function smartCompressGif(file, options, onProgress) {
     const originalHeight = img.height || 600;
     URL.revokeObjectURL(url);
 
-    // Smart Resolution Scaling
-    // For long animations (>10s), limit max dimension to 600px
-    // For standard animations, limit max dimension to 800px
-    // This drastically reduces memory usage and encoding time
-    let maxDimension = 800;
-    if (duration > 10) maxDimension = 600;
-    if (duration > 20) maxDimension = 500; // Very long animations need more aggressive scaling
+    // Smart Resolution Scaling - RELAXED
+    // Only downscale if extremely large to prevent browser crash
+    let maxDimension = 2000; // Increased from 800/600
+    // if (duration > 10) maxDimension = 600; // Removed
+    // if (duration > 20) maxDimension = 500; // Removed
 
     const currentMax = Math.max(originalWidth, originalHeight);
-    if (currentMax > maxDimension) {
+
+    // Smart Upscaling: Ensure minimum resolution for sharpness
+    let minDimension = 1000;
+    if (currentMax < minDimension) {
+        scale = minDimension / currentMax;
+        console.log(`Smart Upscaling: Upscaling from ${currentMax}px to ${minDimension}px (Scale: ${scale.toFixed(2)})`);
+        if (onProgress) onProgress(`Optimizing: Upscaling to ${Math.round(originalWidth * scale)}x${Math.round(originalHeight * scale)} for sharpness...`);
+    }
+    // Smart Downscaling: Prevent browser crash on massive images
+    else if (currentMax > maxDimension) {
         scale = maxDimension / currentMax;
         console.log(`Smart Scaling: Downscaling from ${currentMax}px to ${maxDimension}px (Scale: ${scale.toFixed(2)})`);
         if (onProgress) onProgress(`Optimizing: Resizing to ${Math.round(originalWidth * scale)}x${Math.round(originalHeight * scale)} for performance...`);
@@ -372,39 +518,33 @@ async function smartCompressGif(file, options, onProgress) {
 async function convertSVGtoGIF_Custom(file, duration, fps, width, height, quality, onProgress) {
     return new Promise(async (resolve, reject) => {
         try {
-            const url = URL.createObjectURL(file);
+            // Parse SVG directly from file
+            const svgText = await file.text();
+            const parser = new DOMParser();
+            const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');
+            const svgElement = svgDoc.documentElement;
 
-            // Create a hidden container to embed the SVG
+            // Create a container to hold the inline SVG
             const container = document.createElement('div');
             container.style.position = 'fixed';
             container.style.top = '-10000px';
             container.style.left = '-10000px';
             container.style.width = `${width}px`;
             container.style.height = `${height}px`;
+            container.style.overflow = 'hidden';
             document.body.appendChild(container);
 
-            // Embed SVG using object (better for animation access)
-            const object = document.createElement('object');
-            object.type = 'image/svg+xml';
-            object.data = url;
-            object.style.width = `${width}px`;
-            object.style.height = `${height}px`;
-            container.appendChild(object);
+            // Clone and embed SVG inline (avoids CORS issues)
+            const inlineSvg = svgElement.cloneNode(true);
+            inlineSvg.setAttribute('width', width);
+            inlineSvg.setAttribute('height', height);
+            container.appendChild(inlineSvg);
 
-            // Wait for SVG to load
-            await new Promise((resolveLoad, rejectLoad) => {
-                object.onload = resolveLoad;
-                object.onerror = rejectLoad;
-                setTimeout(rejectLoad, 5000); // 5s timeout
-            });
+            // Wait for SVG to be rendered
+            await new Promise(r => setTimeout(r, 100));
 
-            // Get SVG document and animations
-            const svgDoc = object.contentDocument;
-            if (!svgDoc) {
-                throw new Error('Cannot access SVG document (CORS?)');
-            }
-
-            const animations = svgDoc.getAnimations ? svgDoc.getAnimations({ subtree: true }) : [];
+            // Get animations from the inline SVG
+            const animations = inlineSvg.getAnimations ? inlineSvg.getAnimations({ subtree: true }) : [];
 
             if (onProgress) onProgress(`Found ${animations.length} animations`);
 
@@ -414,13 +554,20 @@ async function convertSVGtoGIF_Custom(file, duration, fps, width, height, qualit
                 anim.currentTime = 0;
             });
 
-            // Setup GIF encoder
+            // Setup GIF encoder with Blob URL for worker (fixes CORS on file://)
+            const workerUrl = 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js';
+            const workerResponse = await fetch(workerUrl);
+            const workerText = await workerResponse.text();
+            const workerBlob = new Blob([workerText], { type: 'application/javascript' });
+            const workerScriptUrl = URL.createObjectURL(workerBlob);
+
             const gif = new GIF({
                 workers: 2,
                 quality: quality,
                 width: width,
                 height: height,
-                workerScript: 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js'
+                workerScript: workerScriptUrl,
+                repeat: 0 // 0 = infinite loop
             });
 
             const canvas = document.createElement('canvas');
@@ -432,26 +579,64 @@ async function convertSVGtoGIF_Custom(file, duration, fps, width, height, qualit
             const frameDuration = 1000 / fps; // ms per frame
 
             // Capture frames
+            // Capture frames using Native Style Baking (The "Perfect" Solution)
+            // 1. Seek animation
+            // 2. Clone SVG
+            // 3. Bake computed styles (CSS animations) into clone
+            // 4. Render clone with native browser engine
+
             for (let i = 0; i < totalFrames; i++) {
                 const currentTimeMs = (i / fps) * 1000;
 
-                // Set animation time
+                // 1. Seek Animation
                 animations.forEach(anim => {
                     anim.currentTime = currentTimeMs;
                 });
 
-                // Wait for render (important!)
+                // Wait for style recalc
+                // requestAnimationFrame is usually enough, but we double-tap to be safe
                 await new Promise(r => requestAnimationFrame(r));
-                await new Promise(r => setTimeout(r, 10)); // Extra wait for complex animations
 
-                // Capture frame using SVG serialization
-                const svgElement = svgDoc.documentElement;
+                // 2. Clone SVG (Captures SMIL attribute changes)
+                const clone = inlineSvg.cloneNode(true);
+
+                // 3. Bake Computed Styles (Captures CSS animations)
+                // We must traverse the original and clone in sync
+                const sourceElements = inlineSvg.querySelectorAll('*');
+                const cloneElements = clone.querySelectorAll('*');
+
+                // Helper to bake styles
+                const bakeStyles = (source, target) => {
+                    const computed = window.getComputedStyle(source);
+                    // Copy critical animation properties
+                    // We don't copy everything to avoid bloating/conflicts
+                    const props = [
+                        'opacity', 'transform', 'visibility', 'display',
+                        'fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-dashoffset',
+                        'filter'
+                    ];
+                    props.forEach(prop => {
+                        const val = computed.getPropertyValue(prop);
+                        if (val && val !== 'none' && val !== 'auto' && val !== '0px') {
+                            target.style.setProperty(prop, val);
+                        }
+                    });
+                };
+
+                // Bake root
+                bakeStyles(inlineSvg, clone);
+
+                // Bake children
+                for (let j = 0; j < sourceElements.length; j++) {
+                    bakeStyles(sourceElements[j], cloneElements[j]);
+                }
+
+                // 4. Serialize & Render
                 const serializer = new XMLSerializer();
-                const svgString = serializer.serializeToString(svgElement);
+                const svgString = serializer.serializeToString(clone);
                 const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
                 const svgUrl = URL.createObjectURL(svgBlob);
 
-                // Draw to canvas
                 const img = new Image();
                 await new Promise((resolveImg, rejectImg) => {
                     img.onload = resolveImg;
@@ -475,7 +660,6 @@ async function convertSVGtoGIF_Custom(file, duration, fps, width, height, qualit
 
             // Cleanup container
             document.body.removeChild(container);
-            URL.revokeObjectURL(url);
 
             // Render GIF
             if (onProgress) onProgress('Rendering GIF...');
@@ -486,7 +670,15 @@ async function convertSVGtoGIF_Custom(file, duration, fps, width, height, qualit
             });
 
             gif.on('finished', (blob) => {
-                resolve(blob);
+                // Cleanup worker URL
+                URL.revokeObjectURL(workerScriptUrl);
+
+                console.log('[GIF] Original blob type:', blob.type);
+                // Ensure the blob has the correct MIME type for download
+                const finalBlob = new Blob([blob], { type: 'image/gif' });
+                console.log('[GIF] Final blob type:', finalBlob.type, 'Size:', finalBlob.size);
+
+                resolve(finalBlob);
             });
 
             gif.render();

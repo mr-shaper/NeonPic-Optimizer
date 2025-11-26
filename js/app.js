@@ -277,6 +277,8 @@ async function compressSingleFile(file, fileId, isLossy, quality) {
     statusText.textContent = 'Processing...';
     progressBar.hidden = false;
 
+    let settings = null; // Lifted to function scope for access in download handler
+
     try {
         let compressedFile;
 
@@ -327,7 +329,7 @@ async function compressSingleFile(file, fileId, isLossy, quality) {
 
             // Show Modal and wait for user choice
             svgModal.hidden = false;
-            const settings = await new Promise(resolve => {
+            settings = await new Promise(resolve => {
                 currentSvgResolve = resolve;
             });
 
@@ -402,14 +404,29 @@ async function compressSingleFile(file, fileId, isLossy, quality) {
         downloadBtn.onclick = () => {
             const a = document.createElement('a');
             a.href = url;
-            // Determine extension
+
+            // Determine extension based on action first (more reliable), then blob type
             let ext = file.name.split('.').pop();
-            if (compressedFile.type === 'image/png') ext = 'png';
-            if (compressedFile.type === 'image/gif') ext = 'gif';
-            if (compressedFile.type === 'image/jpeg') ext = 'jpg';
-            if (compressedFile.type === 'application/pdf') ext = 'pdf';
+
+            if (settings && settings.action === 'gif') {
+                ext = 'gif';
+            } else if (settings && settings.action === 'pdf') {
+                ext = 'pdf';
+            } else if (settings && settings.action === 'raster') {
+                // Raster can be png or jpg
+                ext = settings.rasterFormat === 'image/jpeg' ? 'jpg' : 'png';
+            } else {
+                // Fallback to blob type
+                if (compressedFile.type === 'image/png') ext = 'png';
+                if (compressedFile.type === 'image/gif') ext = 'gif';
+                if (compressedFile.type === 'image/jpeg') ext = 'jpg';
+                if (compressedFile.type === 'application/pdf') ext = 'pdf';
+            }
+
+            console.log('[Download] Action:', settings ? settings.action : 'none', 'Blob type:', compressedFile.type, 'Ext:', ext);
 
             a.download = file.name.replace(/\.[^/.]+$/, "") + "_optimized." + ext;
+            console.log('[Download] Final filename:', a.download);
             a.click();
         };
 
