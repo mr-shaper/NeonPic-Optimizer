@@ -193,7 +193,7 @@ function processFiles(newFiles) {
     // Enable compress button
     if (pendingFiles.length > 0) {
         startCompressBtn.disabled = false;
-        startCompressBtn.textContent = `Compress ${pendingFiles.length} Images`;
+        startCompressBtn.textContent = `Optimize ${pendingFiles.length} Images`;
     }
 }
 
@@ -201,7 +201,15 @@ function addFileToList(file, fileId) {
     const item = document.createElement('div');
     item.className = 'file-item';
     item.id = fileId;
+
+    // Create thumbnail placeholder
+    const thumbUrl = URL.createObjectURL(file);
+
     item.innerHTML = `
+        <div class="file-thumb-wrapper">
+             <img src="${thumbUrl}" class="file-thumb" alt="Preview">
+             <span class="thumb-hint">Hold to Compare</span>
+        </div>
         <div class="file-info">
             <span class="file-name">${file.name}</span>
             <span class="file-size">${formatBytes(file.size)}</span>
@@ -212,11 +220,6 @@ function addFileToList(file, fileId) {
         </div>
         <div class="file-actions" hidden>
             <span class="saved-badge"></span>
-            <button class="btn-compare" title="Compare" hidden>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                   <rect x="2" y="3" width="20" height="18" rx="2" ry="2"></rect><line x1="12" y1="3" x2="12" y2="21"></line>
-                </svg>
-            </button>
             <button class="btn-download" title="Download">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -231,7 +234,7 @@ function addFileToList(file, fileId) {
 
 async function startBatchCompression() {
     startCompressBtn.disabled = true;
-    startCompressBtn.textContent = 'Compressing...';
+    startCompressBtn.textContent = 'Processing...';
 
     const isLossy = document.getElementById('lossy').checked;
     const quality = parseInt(qualitySlider.value) / 100;
@@ -244,7 +247,7 @@ async function startBatchCompression() {
         await compressSingleFile(file, fileId, isLossy, quality);
     }
 
-    startCompressBtn.textContent = 'Compress Now';
+    startCompressBtn.textContent = 'Optimize All';
 }
 
 // Global variable to hold current file for auto-detect
@@ -257,10 +260,11 @@ async function compressSingleFile(file, fileId, isLossy, quality) {
     const fileActions = item.querySelector('.file-actions');
     const savedBadge = item.querySelector('.saved-badge');
     const downloadBtn = item.querySelector('.btn-download');
-    const compareBtn = item.querySelector('.btn-compare');
+    const thumbImg = item.querySelector('.file-thumb');
+    const thumbWrapper = item.querySelector('.file-thumb-wrapper');
 
     // Update status
-    statusText.textContent = 'Compressing...';
+    statusText.textContent = 'Processing...';
     progressBar.hidden = false;
 
     try {
@@ -369,8 +373,15 @@ async function compressSingleFile(file, fileId, isLossy, quality) {
             savedBadge.textContent = `-${savedPercent}%`;
             savedBadge.className = 'saved-badge success';
         } else {
-            savedBadge.textContent = '0%'; // Or show size increase for GIF/Raster
-            savedBadge.className = 'saved-badge neutral';
+            // For conversions (SVG -> GIF/PNG), size might increase.
+            // Show new size or just "Converted"
+            if (file.type === 'image/svg+xml') {
+                savedBadge.textContent = 'Converted';
+                savedBadge.className = 'saved-badge neutral';
+            } else {
+                savedBadge.textContent = `+${Math.abs(savedPercent)}%`;
+                savedBadge.className = 'saved-badge neutral';
+            }
         }
 
         // Setup download
@@ -382,16 +393,33 @@ async function compressSingleFile(file, fileId, isLossy, quality) {
             let ext = file.name.split('.').pop();
             if (compressedFile.type === 'image/png') ext = 'png';
             if (compressedFile.type === 'image/gif') ext = 'gif';
+            if (compressedFile.type === 'image/jpeg') ext = 'jpg';
 
             a.download = file.name.replace(/\.[^/.]+$/, "") + "_optimized." + ext;
             a.click();
         };
 
-        // Setup Comparison (Only for images, not GIF/Video)
-        if (file.type.startsWith('image/') && compressedFile.type !== 'image/gif') {
-            compareBtn.hidden = false;
-            compareBtn.onclick = () => openComparison(file, compressedFile);
-        }
+        // Update Thumbnail to Optimized Version
+        const optimizedUrl = URL.createObjectURL(compressedFile);
+        thumbImg.src = optimizedUrl;
+
+        // Setup Hover Compare (Original vs Optimized)
+        // Store URLs on element for easy access
+        const originalUrl = URL.createObjectURL(file);
+
+        // Hover/Touch events to swap src
+        const showOriginal = () => { thumbImg.src = originalUrl; thumbWrapper.classList.add('showing-original'); };
+        const showOptimized = () => { thumbImg.src = optimizedUrl; thumbWrapper.classList.remove('showing-original'); };
+
+        thumbWrapper.addEventListener('mouseenter', showOriginal);
+        thumbWrapper.addEventListener('mouseleave', showOptimized);
+        thumbWrapper.addEventListener('touchstart', (e) => { e.preventDefault(); showOriginal(); });
+        thumbWrapper.addEventListener('touchend', (e) => { e.preventDefault(); showOptimized(); });
+
+        // Click to open in new tab
+        thumbImg.onclick = () => window.open(optimizedUrl, '_blank');
+        thumbImg.style.cursor = 'zoom-in';
+
 
         // Store for batch download
         processedFiles.push({ file: compressedFile, originalName: file.name, url });
